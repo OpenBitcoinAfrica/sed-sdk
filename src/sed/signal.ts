@@ -6,6 +6,7 @@ import {
   exactlyOne,
   fail,
   nowSeconds,
+  MAX_SIGNAL_TTL_SECONDS,
   ok,
   tagsNamed,
 } from "./common.js";
@@ -86,7 +87,10 @@ export function parseCapabilitySignal(event: NostrEvent): Result<CapabilitySigna
   if (ex) {
     const raw = ex[1] ?? "";
     if (!UNIX_RE.test(raw) || !Number.isSafeInteger(Number(raw))) errors.push('"expiration" must be a unix timestamp in seconds');
-    else expiration = Number(raw);
+    else {
+      expiration = Number(raw);
+      if (expiration - event.created_at > MAX_SIGNAL_TTL_SECONDS) errors.push('"expiration" is more than 90 days after created_at');
+    }
   }
 
   let endpoint = { url: "", port: 0 };

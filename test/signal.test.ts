@@ -150,6 +150,11 @@ describe("capability signal: expiration tag and liveness", () => {
       expect(parseCapabilitySignal(make(replace("expiration", ["expiration", bad]))).ok).toBe(false);
     }
   });
+  it("accepts an expiration exactly 90 days after created_at and rejects one second more", () => {
+    const limit = 1782691200 + 90 * 24 * 60 * 60;
+    expect(parseCapabilitySignal(make(replace("expiration", ["expiration", String(limit)]))).ok).toBe(true);
+    expect(parseCapabilitySignal(make(replace("expiration", ["expiration", String(limit + 1)]))).ok).toBe(false);
+  });
   it("is live through the expiration second and offline one second after", () => {
     const r = parseCapabilitySignal(make(base()));
     if (!r.ok) throw new Error("parse failed");
@@ -215,6 +220,9 @@ describe("capability signal: builder", () => {
     expect(r.value.expiration).toBe(1783296000);
     expect(r.value.endpoint).toEqual({ url: "https://api.service.com", port: 443 });
     expect(signed.content).toBe("SLA window 06:00 to 22:00");
+  });
+  it("refuses an expiration more than 90 days after created_at", () => {
+    expect(() => buildCapabilitySignal({ ...input(), expiration: 1782691200 + 90 * 24 * 60 * 60 + 1 })).toThrow(/expiration/);
   });
   it("uses kind 30078 and puts the d tag in", () => {
     const t = buildCapabilitySignal(input());

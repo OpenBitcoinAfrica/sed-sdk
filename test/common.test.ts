@@ -5,8 +5,8 @@ describe("common", () => {
   it("uses the kinds from the spec", () => {
     expect(SED_KINDS).toEqual({ CAPABILITY_SIGNAL: 30078, ATTESTATION: 30079, REVOCATION: 30080, DELETION: 5 });
   });
-  it("seven days is 604800 seconds", () => {
-    expect(MAX_SIGNAL_TTL_SECONDS).toBe(604800);
+  it("ninety days is 7776000 seconds", () => {
+    expect(MAX_SIGNAL_TTL_SECONDS).toBe(7776000);
   });
   it("tagsNamed returns every tag with that name, and nothing else", () => {
     const e = { tags: [["region", "NG"], ["rail", "bank"], ["region", "KE"]] };

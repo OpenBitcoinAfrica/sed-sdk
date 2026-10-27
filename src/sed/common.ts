@@ -26,7 +26,7 @@ export const SED_KINDS = {
   DELETION: 5,
 } as const;
 
-export const MAX_SIGNAL_TTL_SECONDS = 7 * 24 * 60 * 60;
+export const MAX_SIGNAL_TTL_SECONDS = 90 * 24 * 60 * 60;
 
 export const TIERS = ["tier_1", "tier_2", "tier_3", "tier_4"] as const;
 export type Tier = (typeof TIERS)[number];
