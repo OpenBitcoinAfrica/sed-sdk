@@ -1,0 +1,32 @@
+{
+  "name": "sed-sdk",
+  "version": "0.0.1",
+  "description": "TypeScript SDK for the SeD (Service Discovery) protocol on Nostr",
+  "main": "index.js",
+  "scripts": {
+    "test": "vitest run",
+    "typecheck": "tsc --noEmit",
+    "build": "tsc -p tsconfig.build.json"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/OpenBitcoinAfrica/sed-sdk.git"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "bugs": {
+    "url": "https://github.com/OpenBitcoinAfrica/sed-sdk/issues"
+  },
+  "homepage": "https://github.com/OpenBitcoinAfrica/sed-sdk#readme",
+  "type": "module",
+  "dependencies": {
+    "nostr-tools": "^2.25.2"
+  },
+  "devDependencies": {
+    "@types/node": "^26.6.5",
+    "tsx": "^4.23.15",
+    "typescript": "^7.0.2",
+    "vitest": "^5.0.5"
+  }
+}
