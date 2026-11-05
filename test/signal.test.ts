@@ -221,15 +221,25 @@ describe("capability signal: endpoint tag", () => {
       expect(parseCapabilitySignal(make(replace("endpoint", ["endpoint", "https://api.service.com", bad]))).ok).toBe(false);
     }
   });
-  it("accepts the edge ports", () => {
+  it("accepts the edge ports when the url carries the matching port", () => {
     for (const good of ["1", "65535", "8443"]) {
-      expect(parseCapabilitySignal(make(replace("endpoint", ["endpoint", "https://api.service.com", good]))).ok).toBe(true);
+      const url = `https://api.service.com:${good}`;
+      expect(parseCapabilitySignal(make(replace("endpoint", ["endpoint", url, good]))).ok).toBe(true);
     }
   });
-    it("rejects a url whose port differs from the port tag", () => {
+  it("rejects a url whose port differs from the port tag", () => {
     const r = parseCapabilitySignal(make(replace("endpoint", ["endpoint", "https://api.service.com:8443", "443"])));
     expect(r.ok).toBe(false);
     if (!r.ok) expect(r.errors.some((e) => e.includes("does not match port tag"))).toBe(true);
+  });
+  it("rejects a port tag that contradicts a url with no explicit port", () => {
+    const r = parseCapabilitySignal(make(replace("endpoint", ["endpoint", "https://api.service.com", "8080"])));
+    expect(r.ok).toBe(false);
+  });
+
+  it("accepts a url with no explicit port when the port tag is 443", () => {
+    const r = parseCapabilitySignal(make(replace("endpoint", ["endpoint", "https://api.service.com", "443"])));
+    expect(r.ok && r.value.endpoint).toEqual({ url: "https://api.service.com", port: 443 });
   });
   
   it("accepts a url whose port matches the port tag, keeping the url as given", () => {

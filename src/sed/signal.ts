@@ -146,8 +146,9 @@ export function parseCapabilitySignal(event: NostrEvent): Result<CapabilitySigna
     const portOk = /^[0-9]+$/.test(portRaw) && port >= 1 && port <= 65535;
     if (!portOk) errors.push('"endpoint" port must be a whole number from 1 to 65535');
      if (urlOk && portOk && parsed) {
-      if (parsed.port !== "" && Number(parsed.port) !== port) {
-        errors.push(`"endpoint" url port ${parsed.port} does not match port tag ${port}`);
+      const effectivePort = parsed.port !== "" ? Number(parsed.port) : 443;
+      if (effectivePort !== port) {
+        errors.push(`"endpoint" url port ${effectivePort} does not match port tag ${port}`);
       } else {
         endpoint = { url: rawUrl, port };
       }
