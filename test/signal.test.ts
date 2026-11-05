@@ -3,8 +3,9 @@ import { finalizeEvent, generateSecretKey } from "nostr-tools/pure";
 import { buildCapabilitySignal, isSignalLive, parseCapabilitySignal } from "../src/sed/signal.js";
 
 const sk = generateSecretKey();
+const CREATED_AT = 1782691200;
 const make = (tags: string[][], kind = 30078) =>
-  finalizeEvent({ kind, created_at: 1782691200, tags, content: "" }, sk);
+  finalizeEvent({ kind, created_at: CREATED_AT, tags, content: "" }, sk);
 
 const base = () => [
   ["protocol", "sed"],
@@ -58,6 +59,10 @@ describe("capability signal: nip05 tag", () => {
     const r = parseCapabilitySignal(make(replace("nip05", ["nip05", "api@Service.COM"])));
     expect(r.ok && r.value.domain).toBe("service.com");
   });
+  it("stores an identifier with uppercase letters in lowercase", () => {
+    const r = parseCapabilitySignal(make(replace("nip05", ["nip05", "API@Service.COM"])));
+    expect(r.ok && [r.value.nip05, r.value.name, r.value.domain]).toEqual(["api@service.com", "api", "service.com"]);
+  });
   it("accepts the characters NIP-05 allows in the name", () => {
     expect(parseCapabilitySignal(make(replace("nip05", ["nip05", "_@service.com"]))).ok).toBe(true);
     expect(parseCapabilitySignal(make(replace("nip05", ["nip05", "a.b-c_9@service.com"]))).ok).toBe(true);
@@ -67,8 +72,15 @@ describe("capability signal: nip05 tag", () => {
     expect(parseCapabilitySignal(make([...base(), ["nip05", "other@service.com"]])).ok).toBe(false);
   });
   it("rejects names with characters NIP-05 does not allow", () => {
-    for (const bad of ["API@service.com", "a b@service.com", "a+b@service.com", "@service.com"]) {
+    for (const bad of ["a b@service.com", "a+b@service.com", "@service.com"]) {
       expect(parseCapabilitySignal(make(replace("nip05", ["nip05", bad]))).ok).toBe(false);
+    }
+  });
+  it("rejects an identifier with two @ characters as a shape error", () => {
+    for (const bad of ["api@a@b.com", "api@@service.com"]) {
+      const r = parseCapabilitySignal(make(replace("nip05", ["nip05", bad])));
+      expect(r.ok).toBe(false);
+      if (!r.ok) expect(r.errors.some((e) => e.includes('"name@domain"'))).toBe(true);
     }
   });
   it("rejects a domain that is not a plain hostname", () => {
@@ -81,6 +93,10 @@ describe("capability signal: nip05 tag", () => {
 describe("capability signal: region tags", () => {
   it("keeps every region, in order", () => {
     const r = parseCapabilitySignal(make([...base(), ["region", "KE"]]));
+    expect(r.ok && r.value.regions).toEqual(["NG", "KE"]);
+  });
+  it("drops duplicate regions, keeping first-seen order", () => {
+    const r = parseCapabilitySignal(make([...base(), ["region", "KE"], ["region", "NG"], ["region", "KE"]]));
     expect(r.ok && r.value.regions).toEqual(["NG", "KE"]);
   });
   it("needs at least one", () => {
@@ -98,15 +114,28 @@ describe("capability signal: rail tags", () => {
     const r = parseCapabilitySignal(make([...base(), ["rail", "m-pesa"]]));
     expect(r.ok && r.value.rails).toEqual(["bank_transfer", "m-pesa"]);
   });
+  it("drops duplicate rails, keeping first-seen order", () => {
+    const r = parseCapabilitySignal(make([...base(), ["rail", "m-pesa"], ["rail", "bank_transfer"]]));
+    expect(r.ok && r.value.rails).toEqual(["bank_transfer", "m-pesa"]);
+  });
   it("needs at least one, and none may be empty", () => {
     expect(parseCapabilitySignal(make(without("rail"))).ok).toBe(false);
     expect(parseCapabilitySignal(make(replace("rail", ["rail", "  "]))).ok).toBe(false);
+  });
+  it("reports the empty-rail error only once for several empty rails", () => {
+    const r = parseCapabilitySignal(make([...without("rail"), ["rail", ""], ["rail", "  "], ["rail", ""]]));
+    expect(r.ok).toBe(false);
+    if (!r.ok) expect(r.errors.filter((e) => e.includes('"rail"'))).toHaveLength(1);
   });
 });
 
 describe("capability signal: currency tags", () => {
   it("keeps every currency, in order", () => {
     const r = parseCapabilitySignal(make([...base(), ["currency", "BTC"]]));
+    expect(r.ok && r.value.currencies).toEqual(["NGN", "BTC"]);
+  });
+  it("drops duplicate currencies, keeping first-seen order", () => {
+    const r = parseCapabilitySignal(make([...base(), ["currency", "BTC"], ["currency", "NGN"]]));
     expect(r.ok && r.value.currencies).toEqual(["NGN", "BTC"]);
   });
   it("accepts 3 to 5 uppercase letters or digits", () => {
@@ -150,8 +179,19 @@ describe("capability signal: expiration tag and liveness", () => {
       expect(parseCapabilitySignal(make(replace("expiration", ["expiration", bad]))).ok).toBe(false);
     }
   });
+
+  it("rejects an expiration equal to created_at", () => {
+    const r = parseCapabilitySignal(make(replace("expiration", ["expiration", String(CREATED_AT)])));
+    expect(r.ok).toBe(false);
+    if (!r.ok) expect(r.errors).toContain('"expiration" must be after created_at');
+  });
+
+   it("accepts an expiration one second after created_at", () => {
+    expect(parseCapabilitySignal(make(replace("expiration", ["expiration", String(CREATED_AT + 1)]))).ok).toBe(true);
+  });
+
   it("accepts an expiration exactly 90 days after created_at and rejects one second more", () => {
-    const limit = 1782691200 + 90 * 24 * 60 * 60;
+    const limit = CREATED_AT + 90 * 24 * 60 * 60;
     expect(parseCapabilitySignal(make(replace("expiration", ["expiration", String(limit)]))).ok).toBe(true);
     expect(parseCapabilitySignal(make(replace("expiration", ["expiration", String(limit + 1)]))).ok).toBe(false);
   });
@@ -186,6 +226,17 @@ describe("capability signal: endpoint tag", () => {
       expect(parseCapabilitySignal(make(replace("endpoint", ["endpoint", "https://api.service.com", good]))).ok).toBe(true);
     }
   });
+    it("rejects a url whose port differs from the port tag", () => {
+    const r = parseCapabilitySignal(make(replace("endpoint", ["endpoint", "https://api.service.com:8443", "443"])));
+    expect(r.ok).toBe(false);
+    if (!r.ok) expect(r.errors.some((e) => e.includes("does not match port tag"))).toBe(true);
+  });
+  
+  it("accepts a url whose port matches the port tag, keeping the url as given", () => {
+    const r = parseCapabilitySignal(make(replace("endpoint", ["endpoint", "https://api.service.com:8443", "8443"])));
+    expect(r.ok && r.value.endpoint).toEqual({ url: "https://api.service.com:8443", port: 8443 });
+  });
+
   it("rejects urls that are not absolute https urls", () => {
     for (const bad of ["http://api.service.com", "ftp://api.service.com", "api.service.com", "//api.service.com", "javascript:alert(1)", "file:///etc/passwd", ""]) {
       expect(parseCapabilitySignal(make(replace("endpoint", ["endpoint", bad, "443"]))).ok).toBe(false);
@@ -207,7 +258,7 @@ describe("capability signal: builder", () => {
     expiration: 1783296000,
     endpoint: { url: "https://api.service.com", port: 443 },
     content: "SLA window 06:00 to 22:00",
-    createdAt: 1782691200,
+    createdAt: CREATED_AT,
   });
   it("builds an event the parser accepts, with the values we gave", () => {
     const signed = finalizeEvent(buildCapabilitySignal(input()), sk);
@@ -230,9 +281,10 @@ describe("capability signal: builder", () => {
     expect(t.tags).toContainEqual(["d", "capability-signal"]);
   });
   it("defaults created_at to now and content to empty", () => {
-    const { createdAt, content, ...rest } = input();
-    const t = buildCapabilitySignal(rest);
-    expect(Math.abs(t.created_at - Math.floor(Date.now() / 1000))).toBeLessThan(5);
+     const { createdAt, content, ...rest } = input();
+    const now = Math.floor(Date.now() / 1000);
+    const t = buildCapabilitySignal({ ...rest, expiration: now + 24 * 60 * 60 });
+    expect(Math.abs(t.created_at - now)).toBeLessThan(5);
     expect(t.content).toBe("");
   });
   it("refuses to build something the parser would reject", () => {
