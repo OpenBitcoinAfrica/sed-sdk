@@ -108,3 +108,6 @@ These are choices the spec does not settle, or where this SDK is deliberately di
 * Which tags in an attestation and a revocation are required?
 * For SeD-01: what makes an operational key "expired", where does the expected identity key come from, how long may a `nostr.json` result be cached, and may a service have several operational key names?
 * For SeD-06: what is the "proportional risk discount" at distance 2, what are the default freshness windows, and what counts as "relevance"?
+
+
+npm install, npm run typecheck, npm test.
