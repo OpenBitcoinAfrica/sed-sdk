@@ -21,12 +21,16 @@
   "homepage": "https://github.com/OpenBitcoinAfrica/sed-sdk#readme",
   "type": "module",
   "dependencies": {
+    "@noble/curves": "^2.0.1",
+    "@noble/hashes": "^2.0.1",
     "nostr-tools": "^2.25.2"
   },
   "devDependencies": {
     "@types/node": "^26.6.5",
+    "@types/ws": "^8.18.2",
     "tsx": "^4.23.15",
     "typescript": "^7.0.2",
-    "vitest": "^5.0.5"
+    "vitest": "^5.0.5",
+    "ws": "^8.22.1"
   }
 }

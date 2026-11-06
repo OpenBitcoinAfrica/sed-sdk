@@ -6,7 +6,7 @@ The SDK is written against the SeD specification at https://github.com/OpenBitco
 
 ## Status
 
-The SDK is unfinished. The first layer, reading, checking and building SeD events, is done. Checking that an event's signature is genuine is done, so is checking that an operational key is authorized to sign for a service, running every SeD-06 phase 1 check together in one call, and publishing to or querying a relay. Trust scoring is not.
+The SDK is feature-complete against the spec as it stands in pull request 3. Reading, checking and building SeD events is done. Checking that an event's signature is genuine is done, so is checking that an operational key is authorized to sign for a service, running every SeD-06 phase 1 check together in one call, publishing to or querying a relay, private (encrypted) attestations, and weighing the evidence a graph of attestations actually provides (SeD-06 phases 2 and 3). What's left is a bridge to the Pontmore agent discovery protocol, which isn't part of SeD itself.
 
 ### Implemented
 
@@ -19,15 +19,15 @@ The SDK is unfinished. The first layer, reading, checking and building SeD event
 | Operational key authorization | SeD-01 | `resolveServiceIdentity`, `resolveSignalIdentity` |
 | Combined phase 1 check | SeD-06 phase 1 | `resolveTrustedSignal` |
 | Relay transport | SeD-04 | `createRelayPool`, `publishEvent`, `fetchEvents` |
+| Private (encrypted) attestations | SeD-03 section 3.6 | `buildPrivateAttestation`, `decryptPrivateAttestation`, `parsePrivateAttestationEnvelope`, `privateAttestationDTag` |
+| Trust evaluation | SeD-06 phases 2 and 3 | `evaluateTrust` |
 | Shared helpers | | `Result`, `ok`, `fail`, `exactlyOne`, `tagsNamed`, event kinds, tiers, interaction types |
 
 Every parser takes a Nostr event and returns a `Result`: either `{ ok: true, value }` or `{ ok: false, errors }`. Parsers never throw, and they report every problem at once. Every builder returns an unsigned event, and refuses to build anything its own parser would reject.
 
 ### Not implemented yet
 
-* Trust evaluation (SeD-06 phases 2 and 3): anchors, graph distance, disputes, stale data and conflicts.
-* Private, encrypted attestations (SeD-03 section 3.6).
-* A bridge to the Pontmore agent discovery protocol.
+* A bridge to the Pontmore agent discovery protocol. Not part of SeD itself.
 * NIP-13 proof-of-work and Lightning-payment admission for relays that require them (SeD-04 section 4.2). `publishEvent` sends the event as is; a relay enforcing either of these will reject it, and this SDK does not yet mine a PoW nonce or attach an invoice to get past that.
 
 ## Getting started
@@ -42,8 +42,9 @@ npm test
 Other commands:
 
 ```
-npm run typecheck   # check types without running anything
-npm run build       # compile to dist/
+npm run typecheck              # check types without running anything
+npm run build                  # compile to dist/
+npx tsx examples/walkthrough.ts  # a narrated, step-by-step run through every piece
 ```
 
 ## Example
@@ -100,7 +101,9 @@ pool.destroy();
 src/sed/common.ts        shared types, kinds, tiers and tag helpers
 src/sed/signal.ts        SeD-02 capability signal
 src/sed/attestation.ts   SeD-03 attestation
+src/sed/private-attestation.ts  SeD-03 section 3.6, private (encrypted) attestation
 src/sed/revocation.ts    SeD-05 revocation and deletion request
+src/sed/reputation.ts    SeD-06 phases 2 and 3, trust evaluation
 src/sed/verify.ts        SeD-06 phase 1 signature and id verification
 src/sed/identity.ts      SeD-01 operational key authorization
 src/sed/trust.ts         SeD-06 phase 1, run end to end
@@ -125,12 +128,18 @@ These are choices the spec does not settle, or where this SDK is deliberately di
 * **`resolveServiceIdentity` keeps no history.** It only reports what a domain's `nostr.json` says right now. SeD-01 treats OPK rotation as routine and expected, and says nothing about a client needing to notice when the IPK itself changes for a domain it already knew. A caller that wants to notice that has to keep its own record of which IPK it last saw for a domain; this function does not keep one for it.
 * **`resolveTrustedSignal` takes `revocations` as a plain argument, it does not fetch them.** This SDK's relay transport can fetch them (`fetchEvents` with `kinds: [30080]`), but `resolveTrustedSignal` itself stays decoupled from any particular transport; the caller wires the two together.
 * **Relay transport depends on a narrow `RelayPool` interface, not on nostr-tools' pool directly.** SeD-04 section 4.1 says SeD payloads are not tied to Nostr relays specifically, a DHT or a gossip channel is also allowed. `publishEvent` and `fetchEvents` only need `publish` and `querySync`, so anything with those two methods can stand in for `createRelayPool`'s real one.
+* **A private attestation's outer event carries a public tag naming the recipient, not the subject.** SeD-03 section 3.6 says the subject tag "can be restricted or blinded" without saying which. This SDK tags the recipient so they can find it with an ordinary relay filter instead of pulling every private attestation an attester ever published and trying to decrypt each one; the real subject stays inside the encrypted content, built with the exact same `buildAttestation` used for public attestations.
+* **A private attestation's public "d" tag is a hash of the attester and recipient's own NIP-44 conversation key, the subject, and the type, not plain text.** The spec doesn't say what the "d" tag should be for a private attestation; using the plain-text `attestation:<subject>:<type>` format would defeat the whole point, since anyone reading the relay would learn exactly who is being attested to. Only the attester and the recipient can ever reconstruct this value, since only they can compute that conversation key (`privateAttestationDTag`).
+* **Reaching several consortium members means publishing once per member.** NIP-44 is a point-to-point mechanism, there's no group-encryption primitive in the spec or in NIP-44 itself. `buildPrivateAttestation` encrypts for exactly one recipient; a caller that wants a consortium of five members to all read the same attestation calls it five times.
+* **`evaluateTrust` never returns a trust score.** SeD-06's own introduction says SeD "completely rejects numeric scoring algorithms, star ratings, and global reputation weights", but phase 2 also talks about a "proportional risk discount" at distance 2 without ever defining one, no percentage, no formula, anywhere in the spec. Rather than invent a number the protocol explicitly says not to compute, `evaluateTrust` returns the evidence: the graph distance, which attestations support it, any disputes from the caller's own anchors, any conflicting attestations at the same distance. The calling application decides what to do with that.
+* **The freshness window and search depth for trust evaluation are both configurable, with defaults.** SeD-06 phase 3 says a client "MAY define freshness windows per interaction type" and phase 2 says a client may "explicitly allow deeper trust paths", neither sets a number. `evaluateTrust` defaults to roughly 6 months for freshness and 2 hops for search depth (matching the spec's own cutoff for when a path stops being reliable), both overridable per call.
+* **A capability-relevant query (rail, minimum tier) only ever excludes an attestation that actively contradicts it, never one that simply doesn't mention it.** SeD-03's attestation fields are all optional. Treating a silent field as a mismatch would throw away attestations that just didn't happen to state a rail or tier, rather than ones that genuinely don't qualify.
 
 ## Open questions for the spec
 
 * Which values may `capacity_tier` take?
 * Which tags in an attestation and a revocation are required?
 * For SeD-01: what makes an operational key "expired", separately from the capability signal's own `expiration` tag? How long may a `nostr.json` result be cached before it needs re-checking?
-* For SeD-06: what is the "proportional risk discount" at distance 2, what are the default freshness windows, and what counts as "relevance"?
+* For SeD-06: what is the "proportional risk discount" at distance 2 actually supposed to be, given section 3.1 says SeD rejects numeric scoring outright? This SDK's answer is to not compute one at all, see "evaluateTrust never returns a trust score" above.
 
 npm install, npm run typecheck, npm test.
