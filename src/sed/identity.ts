@@ -11,6 +11,21 @@ export interface ServiceIdentity {
 const DEFAULT_TIMEOUT_MS = 5000;
 
 /**
+ * The single case policy for keys in this module: hex keys are accepted in
+ * any case and normalized to lowercase. Returns the lowercase key, or null
+ * if the value is not 64 hex characters.
+ */
+export function normalizeHex64(value: string): string | null {
+  const lower = value.toLowerCase();
+  return HEX64.test(lower) ? lower : null;
+}
+
+/** True for a JSON object; false for null, arrays and primitives. */
+function isPlainObject(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+/**
  * SeD-01 section 1.2: confirms that an operational key is authorized to sign
  * for a service, and reads out the service's real identity key alongside it.
  *
@@ -18,6 +33,9 @@ const DEFAULT_TIMEOUT_MS = 5000;
  * matches whatever is listed under `opkName` in that file's `names` map,
  * and returns the `_` entry from the same file as the service's IPK.
  *
+ * Keys are compared case-insensitively and returned in lowercase, whether
+ * they come from the caller or from the file.
+ * 
  * This only checks what the domain currently says. It does not know or care
  * whether that domain said something different yesterday: SeD-01 treats key
  * rotation as routine, so there is nothing to compare against here. A
@@ -33,7 +51,8 @@ export async function resolveServiceIdentity(
   const fetchImpl = options.fetchImpl ?? fetch;
   const timeoutMs = options.timeoutMs ?? DEFAULT_TIMEOUT_MS;
 
-  if (!HEX64.test(opk)) return fail('"opk" must be 64 lowercase hex characters');
+  const inputOpk = normalizeHex64(opk);
+  if (inputOpk === null) return fail('"opk" must be 64 hex characters');
 
   let url: URL;
   try {
@@ -54,35 +73,41 @@ export async function resolveServiceIdentity(
     return fail(`could not reach ${domain}: ${reason}`);
   }
 
-  if (typeof body !== "object" || body === null || !("names" in body)) {
-    return fail(`nostr.json at ${domain} has no "names" object`);
-  }
-  const names = (body as { names: unknown }).names;
-  if (typeof names !== "object" || names === null) {
+
+  if (!isPlainObject(body) || !isPlainObject(body["names"])) {
     return fail(`nostr.json at ${domain} has no "names" object`);
   }
 
-  const rawOpk = (names as Record<string, unknown>)[opkName];
+  
+  const names = body["names"];
+ 
+
+   const rawOpk = names[opkName];
   if (typeof rawOpk !== "string") {
     return fail(`nostr.json at ${domain} has no "${opkName}" entry under "names"`);
   }
-  const fileOpk = rawOpk.toLowerCase();
-  if (!HEX64.test(fileOpk)) {
+
+  
+  const fileOpk = normalizeHex64(rawOpk);
+  if (fileOpk === null) {
     return fail(`"${opkName}" in nostr.json at ${domain} must be 64 hex characters`);
   }
 
-  const rawIpk = (names as Record<string, unknown>)["_"];
+  if (fileOpk !== inputOpk) {
+    return fail(`the "${opkName}" entry in nostr.json at ${domain} does not match the key that signed this event`);
+  }
+
+   const rawIpk = names["_"];
   if (typeof rawIpk !== "string") {
     return fail(`nostr.json at ${domain} has no "_" entry under "names"`);
   }
-  const ipk = rawIpk.toLowerCase();
-  if (!HEX64.test(ipk)) {
+  
+   const ipk = normalizeHex64(rawIpk);
+  if (ipk === null) {
     return fail(`"_" in nostr.json at ${domain} must be 64 hex characters`);
   }
 
-  if (fileOpk !== opk.toLowerCase()) {
-    return fail(`the "${opkName}" entry in nostr.json at ${domain} does not match the key that signed this event`);
-  }
+  
   if (ipk === fileOpk) {
     return fail(`"_" and "${opkName}" must not be the same key in nostr.json at ${domain}`);
   }
