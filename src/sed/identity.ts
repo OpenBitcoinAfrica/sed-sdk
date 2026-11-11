@@ -11,6 +11,9 @@ export interface ServiceIdentity {
 export interface ResolveOptions {
   fetchImpl?: typeof fetch;
   timeoutMs?: number;
+  /** Previously trusted service IPK. When provided, resolution fails if the
+   * domain's current `_` entry differs. The caller must retain this value
+   * across calls; this function does not keep identity history. */
   expectedIpk?: string;
 }
 
@@ -42,11 +45,11 @@ function isPlainObject(value: unknown): value is Record<string, unknown> {
  * Keys are compared case-insensitively and returned in lowercase, whether
  * they come from the caller or from the file.
  * 
- * This only checks what the domain currently says. It does not know or care
- * whether that domain said something different yesterday: SeD-01 treats key
- * rotation as routine, so there is nothing to compare against here. A
- * caller that wants to notice when a service's identity key changes between
- * two calls has to keep that history itself; this function is stateless.
+ * SeD-01 treats the IPK in `_` as the service's permanent identity; OPKs may
+ * rotate, but a changed IPK is a red flag. This function is stateless and can
+ * only compare the current value against a previously trusted IPK when the
+ * caller supplies it as `expectedIpk`. Callers must retain that trusted value
+ * (or otherwise keep identity history) across calls to detect a change.
  */
 export async function resolveServiceIdentity(
   domain: string,
