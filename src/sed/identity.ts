@@ -2,9 +2,12 @@ import { type CapabilitySignal } from "./signal.js";
 import { type Result, HEX64, fail, ok } from "./common.js";
 
 export interface ServiceIdentity {
+  /** Name-specific OPK listed by the domain's current nostr.json response. */
   opkName: string;
+  /** Domain that currently lists this OPK and IPK together. */
   domain: string;
   opk: string;
+  /** IPK the domain currently lists; this is not proof of a verified identity. */
   ipk: string;
 }
 
@@ -126,8 +129,11 @@ function parseDomain(domain: string): Result<URL> {
 }
 
 export function resolveSignalIdentity(
-  signal: Pick<CapabilitySignal, "domain" | "name" | "opk">,
+  signal: Pick<CapabilitySignal, "domain" | "name" | "opk"> & Partial<Pick<CapabilitySignal, "nip05">>,
   options?: ResolveOptions,
 ): Promise<Result<ServiceIdentity>> {
-  return resolveServiceIdentity(signal.domain, signal.name, signal.opk, options);
+  // Parsed signals derive these fields from the nip05 tag. Prefer that tag
+  // directly so the exact published name is always the one checked in names.
+  const opkName = signal.nip05?.split("@", 1)[0] ?? signal.name;
+  return resolveServiceIdentity(signal.domain, opkName, signal.opk, options);
 }
