@@ -32,6 +32,12 @@ describe("resolveServiceIdentity: the happy path", () => {
     expect((await resolveServiceIdentity("service.com", "pos", OPK, { fetchImpl })).ok).toBe(true);
   });
 
+  it("rejects an uppercase opk from the caller", async () => {
+    const fetchImpl = mockFetch(200, { names: { _: IPK, api: OPK } });
+    const r = await resolveServiceIdentity("service.com", "api", OPK.toUpperCase(), { fetchImpl });
+    expect(r.ok).toBe(false);
+  });
+
   it("compares and returns keys case-insensitively, normalized to lowercase", async () => {
     const fetchImpl = mockFetch(200, { names: { _: IPK.toUpperCase(), api: OPK.toUpperCase() } });
     const r = await resolveServiceIdentity("service.com", "api", OPK, { fetchImpl });
