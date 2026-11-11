@@ -129,3 +129,93 @@ describe("resolveSignalIdentity", () => {
     expect(r).toEqual({ ok: true, value: { opkName: "api", domain: "service.com", opk: OPK, ipk: IPK } });
   });
 });
+
+describe("resolveServiceIdentity: hostile domains are rejected before any request", () => {
+  const hostile = [
+    "trusted.com@evil.com",
+    "evil.com/x?",
+    "evil.com#",
+    "evil.com?",
+    "evil.com:8443",
+    "user:pass@evil.com",
+    "127.0.0.1",
+    "10.0.0.5",
+    "[::1]",
+    "localhost",
+    "service.com.",
+    "",
+    "evil.com\\@trusted.com",
+    "service .com",
+  ];
+  for (const domain of hostile) {
+    it(`rejects ${JSON.stringify(domain)}`, async () => {
+      const fetchImpl = mockFetch(200, { names: { _: IPK, api: OPK } });
+      const r = await resolveServiceIdentity(domain, "api", OPK, { fetchImpl });
+      expect(r.ok).toBe(false);
+      expect(fetchImpl).not.toHaveBeenCalled();
+    });
+  }
+
+  it("returns the host in lowercase, not the text it was given", async () => {
+    const fetchImpl = mockFetch(200, { names: { _: IPK, api: OPK } });
+    const r = await resolveServiceIdentity("Service.COM", "api", OPK, { fetchImpl });
+    expect(r.ok && r.value.domain).toBe("service.com");
+  });
+});
+
+describe("resolveServiceIdentity: redirects are not followed", () => {
+  it("asks fetch to refuse redirects", async () => {
+    const fetchImpl = mockFetch(200, { names: { _: IPK, api: OPK } });
+    await resolveServiceIdentity("service.com", "api", OPK, { fetchImpl });
+    const [, init] = (fetchImpl as ReturnType<typeof vi.fn>).mock.calls[0]!;
+    expect((init as RequestInit).redirect).toBe("error");
+  });
+
+  it("rejects a response that reports it was redirected", async () => {
+    const fetchImpl = vi.fn(async () => ({
+      ok: true,
+      status: 200,
+      redirected: true,
+      url: "https://service.com/.well-known/nostr.json",
+      json: async () => ({ names: { _: IPK, api: OPK } }),
+    })) as unknown as typeof fetch;
+    const r = await resolveServiceIdentity("service.com", "api", OPK, { fetchImpl });
+    expect(r.ok).toBe(false);
+    if (!r.ok) expect(r.errors[0]).toMatch(/redirect/);
+  });
+
+  it("rejects a response that came from a different address than the one requested", async () => {
+    const fetchImpl = vi.fn(async () => ({
+      ok: true,
+      status: 200,
+      redirected: false,
+      url: "https://evil.com/.well-known/nostr.json",
+      json: async () => ({ names: { _: IPK, api: OPK } }),
+    })) as unknown as typeof fetch;
+    const r = await resolveServiceIdentity("service.com", "api", OPK, { fetchImpl });
+    expect(r.ok).toBe(false);
+  });
+});
+
+describe("resolveServiceIdentity: expectedIpk", () => {
+  it("passes when the domain lists the expected IPK", async () => {
+    const fetchImpl = mockFetch(200, { names: { _: IPK, api: OPK } });
+    const r = await resolveServiceIdentity("service.com", "api", OPK, { fetchImpl, expectedIpk: IPK.toUpperCase() });
+    expect(r.ok).toBe(true);
+  });
+
+  it("fails when the domain lists a different IPK", async () => {
+    const other = getPublicKey(generateSecretKey());
+    const fetchImpl = mockFetch(200, { names: { _: other, api: OPK } });
+    const r = await resolveServiceIdentity("service.com", "api", OPK, { fetchImpl, expectedIpk: IPK });
+    expect(r.ok).toBe(false);
+    if (!r.ok) expect(r.errors[0]).toMatch(/not the identity key that was expected/);
+  });
+
+  it("rejects a malformed expectedIpk before fetching", async () => {
+    const fetchImpl = mockFetch(200, { names: { _: IPK, api: OPK } });
+    const r = await resolveServiceIdentity("service.com", "api", OPK, { fetchImpl, expectedIpk: "nope" });
+    expect(r.ok).toBe(false);
+    expect(fetchImpl).not.toHaveBeenCalled();
+  });
+});
