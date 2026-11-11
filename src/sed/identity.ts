@@ -8,6 +8,12 @@ export interface ServiceIdentity {
   ipk: string;
 }
 
+export interface ResolveOptions {
+  fetchImpl?: typeof fetch;
+  timeoutMs?: number;
+  expectedIpk?: string;
+}
+
 const DEFAULT_TIMEOUT_MS = 5000;
 
 /**
@@ -46,7 +52,7 @@ export async function resolveServiceIdentity(
   domain: string,
   opkName: string,
   opk: string,
-  options: { fetchImpl?: typeof fetch; timeoutMs?: number } = {},
+  options: ResolveOptions = {},
 ): Promise<Result<ServiceIdentity>> {
   const fetchImpl = options.fetchImpl ?? fetch;
   const timeoutMs = options.timeoutMs ?? DEFAULT_TIMEOUT_MS;
@@ -54,16 +60,22 @@ export async function resolveServiceIdentity(
   const inputOpk = normalizeHex64(opk);
   if (inputOpk === null) return fail('"opk" must be 64 hex characters');
 
-  let url: URL;
-  try {
-    url = new URL(`https://${domain}/.well-known/nostr.json`);
-  } catch {
-    return fail(`"${domain}" is not a usable domain`);
+  const expectedIpk = options.expectedIpk?.toLowerCase();
+  if (expectedIpk !== undefined && !HEX64.test(expectedIpk)) {
+    return fail('"expectedIpk" must be 64 hex characters');
   }
+
+  const parsed = parseDomain(domain);
+  if (!parsed.ok) return parsed;
+  const url = parsed.value;
+  domain = url.hostname;
 
   let body: unknown;
   try {
-    const response = await fetchImpl(url, { signal: AbortSignal.timeout(timeoutMs) });
+    const response = await fetchImpl(url, { signal: AbortSignal.timeout(timeoutMs), redirect: "error" });
+    if (response.redirected || (response.url && response.url !== url.href)) {
+      return fail(`${domain} redirected the request, and redirects are not followed`);
+    }
     if (!response.ok) {
       return fail(`could not reach ${domain}: HTTP ${response.status}`);
     }
@@ -106,6 +118,9 @@ export async function resolveServiceIdentity(
   if (ipk === null) {
     return fail(`"_" in nostr.json at ${domain} must be 64 hex characters`);
   }
+  if (expectedIpk !== undefined && ipk !== expectedIpk) {
+    return fail(`the "_" entry in nostr.json at ${domain} is not the identity key that was expected for this service`);
+  }
 
   
   if (ipk === fileOpk) {
@@ -115,10 +130,27 @@ export async function resolveServiceIdentity(
   return ok({ opkName, domain, opk: fileOpk, ipk });
 }
 
-/** Convenience wrapper that pulls the domain, name and OPK straight off an already-parsed capability signal. */
+function parseDomain(domain: string): Result<URL> {
+  const bad = () => fail(`"${domain}" is not a usable domain`);
+  if (typeof domain !== "string" || domain === "" || domain.endsWith(".")) return bad();
+
+  let url: URL;
+  try {
+    url = new URL(`https://${domain}/.well-known/nostr.json`);
+  } catch {
+    return bad();
+  }
+
+  if (url.hostname !== domain.toLowerCase()) return bad();
+  if (url.port !== "" || url.username !== "" || url.password !== "") return bad();
+  if (!url.hostname.includes(".")) return bad();
+  if (/^[0-9.]+$/.test(url.hostname) || url.hostname.includes(":")) return bad();
+  return ok(url);
+}
+
 export function resolveSignalIdentity(
   signal: Pick<CapabilitySignal, "domain" | "name" | "opk">,
-  options?: { fetchImpl?: typeof fetch; timeoutMs?: number },
+  options?: ResolveOptions,
 ): Promise<Result<ServiceIdentity>> {
   return resolveServiceIdentity(signal.domain, signal.name, signal.opk, options);
 }
