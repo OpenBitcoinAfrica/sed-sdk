@@ -8,43 +8,41 @@ export interface ServiceIdentity {
   ipk: string;
 }
 
+export interface ResolveOptions {
+  fetchImpl?: typeof fetch;
+  timeoutMs?: number;
+  expectedIpk?: string;
+}
+
 const DEFAULT_TIMEOUT_MS = 5000;
 
-/**
- * SeD-01 section 1.2: confirms that an operational key is authorized to sign
- * for a service, and reads out the service's real identity key alongside it.
- *
- * Fetches `https://<domain>/.well-known/nostr.json`, checks that `opk`
- * matches whatever is listed under `opkName` in that file's `names` map,
- * and returns the `_` entry from the same file as the service's IPK.
- *
- * This only checks what the domain currently says. It does not know or care
- * whether that domain said something different yesterday: SeD-01 treats key
- * rotation as routine, so there is nothing to compare against here. A
- * caller that wants to notice when a service's identity key changes between
- * two calls has to keep that history itself; this function is stateless.
- */
 export async function resolveServiceIdentity(
   domain: string,
   opkName: string,
   opk: string,
-  options: { fetchImpl?: typeof fetch; timeoutMs?: number } = {},
+  options: ResolveOptions = {},
 ): Promise<Result<ServiceIdentity>> {
   const fetchImpl = options.fetchImpl ?? fetch;
   const timeoutMs = options.timeoutMs ?? DEFAULT_TIMEOUT_MS;
 
   if (!HEX64.test(opk)) return fail('"opk" must be 64 lowercase hex characters');
 
-  let url: URL;
-  try {
-    url = new URL(`https://${domain}/.well-known/nostr.json`);
-  } catch {
-    return fail(`"${domain}" is not a usable domain`);
+  const expectedIpk = options.expectedIpk?.toLowerCase();
+  if (expectedIpk !== undefined && !HEX64.test(expectedIpk)) {
+    return fail('"expectedIpk" must be 64 hex characters');
   }
+
+  const parsed = parseDomain(domain);
+  if (!parsed.ok) return parsed;
+  const url = parsed.value;
+  domain = url.hostname;
 
   let body: unknown;
   try {
-    const response = await fetchImpl(url, { signal: AbortSignal.timeout(timeoutMs) });
+    const response = await fetchImpl(url, { signal: AbortSignal.timeout(timeoutMs), redirect: "error" });
+    if (response.redirected || (response.url && response.url !== url.href)) {
+      return fail(`${domain} redirected the request, and redirects are not followed`);
+    }
     if (!response.ok) {
       return fail(`could not reach ${domain}: HTTP ${response.status}`);
     }
@@ -79,6 +77,9 @@ export async function resolveServiceIdentity(
   if (!HEX64.test(ipk)) {
     return fail(`"_" in nostr.json at ${domain} must be 64 hex characters`);
   }
+  if (expectedIpk !== undefined && ipk !== expectedIpk) {
+    return fail(`the "_" entry in nostr.json at ${domain} is not the identity key that was expected for this service`);
+  }
 
   if (fileOpk !== opk.toLowerCase()) {
     return fail(`the "${opkName}" entry in nostr.json at ${domain} does not match the key that signed this event`);
@@ -90,10 +91,27 @@ export async function resolveServiceIdentity(
   return ok({ opkName, domain, opk: fileOpk, ipk });
 }
 
-/** Convenience wrapper that pulls the domain, name and OPK straight off an already-parsed capability signal. */
+function parseDomain(domain: string): Result<URL> {
+  const bad = () => fail(`"${domain}" is not a usable domain`);
+  if (typeof domain !== "string" || domain === "" || domain.endsWith(".")) return bad();
+
+  let url: URL;
+  try {
+    url = new URL(`https://${domain}/.well-known/nostr.json`);
+  } catch {
+    return bad();
+  }
+
+  if (url.hostname !== domain.toLowerCase()) return bad();
+  if (url.port !== "" || url.username !== "" || url.password !== "") return bad();
+  if (!url.hostname.includes(".")) return bad();
+  if (/^[0-9.]+$/.test(url.hostname) || url.hostname.includes(":")) return bad();
+  return ok(url);
+}
+
 export function resolveSignalIdentity(
   signal: Pick<CapabilitySignal, "domain" | "name" | "opk">,
-  options?: { fetchImpl?: typeof fetch; timeoutMs?: number },
+  options?: ResolveOptions,
 ): Promise<Result<ServiceIdentity>> {
   return resolveServiceIdentity(signal.domain, signal.name, signal.opk, options);
 }
