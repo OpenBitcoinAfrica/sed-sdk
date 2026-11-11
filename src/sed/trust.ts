@@ -1,6 +1,6 @@
 import { type NostrEvent, type Result, fail, nowSeconds, ok } from "./common.js";
 import { type CapabilitySignal, isSignalLive, parseCapabilitySignal } from "./signal.js";
-import { type ServiceIdentity, resolveSignalIdentity } from "./identity.js";
+import { type ResolveOptions, type ServiceIdentity, resolveSignalIdentity } from "./identity.js";
 import { type Revocation, isOpkRevoked } from "./revocation.js";
 import { verifyEventSignature } from "./verify.js";
 
@@ -13,7 +13,7 @@ export async function resolveTrustedSignal(
   event: NostrEvent,
   revocations: Revocation[],
   now: number = nowSeconds(),
-  options?: { fetchImpl?: typeof fetch; timeoutMs?: number },
+  options?: ResolveOptions,
 ): Promise<Result<TrustedSignal>> {
   const signed = verifyEventSignature(event);
   if (!signed.ok) return signed;
