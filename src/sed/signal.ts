@@ -55,7 +55,6 @@ export function parseCapabilitySignal(event: NostrEvent): Result<CapabilitySigna
   if (n) {
     const value = (n[1] ?? "").trim().toLowerCase();
     const [local = "", host = "", ...rest] = value.split("@");
-    const parts = value.split("@");
     if(rest.length > 0 || local === "" || host === "" || !NIP05_LOCAL_RE.test(local)) {
       errors.push('"nip05" must look like "name@domain", with the name using only a-z 0-9 - _ .');
     } else if (!HOSTNAME_RE.test(host)) {

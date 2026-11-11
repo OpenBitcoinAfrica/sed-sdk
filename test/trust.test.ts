@@ -101,3 +101,17 @@ describe("resolveTrustedSignal: stops at the first failing step", () => {
     expect(r.ok).toBe(true);
   });
 });
+
+describe("resolveTrustedSignal: expectedIpk", () => {
+  it("passes when the domain lists the expected IPK", async () => {
+    const r = await resolveTrustedSignal(signal(), [], NOW, { fetchImpl: mockFetch(nostrJson), expectedIpk: IPK });
+    expect(r.ok).toBe(true);
+  });
+
+  it("stops at identity when the domain lists a different IPK than the one expected", async () => {
+    const other = getPublicKey(generateSecretKey());
+    const r = await resolveTrustedSignal(signal(), [], NOW, { fetchImpl: mockFetch({ names: { _: other, api: OPK } }), expectedIpk: IPK });
+    expect(r.ok).toBe(false);
+    if (!r.ok) expect(r.errors[0]).toMatch(/not the identity key that was expected/);
+  });
+});

@@ -20,8 +20,7 @@
  * has a well-documented history of crashing the whole process, not just
  * failing the one connection, when a connection errors out (a relay
  * refusing the connection, being unreachable, or sending something it
- * doesn't like). `ws` fails the same situations normally instead. See
- * src/sed/relay.ts for the longer explanation.
+ * doesn't like). `ws` fails the same situations normally instead.
  */
 import WebSocket from "ws";
 import { finalizeEvent, generateSecretKey, getPublicKey } from "nostr-tools/pure";

@@ -2,7 +2,8 @@
   "name": "sed-sdk",
   "version": "0.0.1",
   "description": "TypeScript SDK for the SeD (Service Discovery) protocol on Nostr",
-  "main": "index.js",
+  "main": "dist/sed/index.js",
+  "types": "dist/sed/index.d.ts",
   "scripts": {
     "test": "vitest run",
     "typecheck": "tsc --noEmit",
@@ -20,6 +21,9 @@
   },
   "homepage": "https://github.com/OpenBitcoinAfrica/sed-sdk#readme",
   "type": "module",
+  "engines": {
+    "node": ">=22"
+  },
   "dependencies": {
     "@noble/curves": "^2.0.1",
     "@noble/hashes": "^2.0.1",

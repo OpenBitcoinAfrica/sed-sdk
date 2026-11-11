@@ -54,11 +54,16 @@ export function exactlyOne(
   return found[0]!;
 }
 
-export function requireMany(event: NostrEvent, name: string, isValid: (value: string) => boolean, 
-describe: (value: string) => string, errors: string[]): string[] {
+export function requireMany(
+  event: NostrEvent,
+  name: string,
+  isValid: (value: string) => boolean,
+  describe: (value: string) => string,
+  errors: string[],
+): string[] {
   const values = tagsNamed(event, name).map((t) => t[1] ?? "");
   if (values.length === 0) errors.push(`at least one "${name}" tag is required`);
-  
+
   for (const v of values) if (!isValid(v)) errors.push(`invalid "${name}" tag: ${describe(v)}`);
-  return  [...new Set(values)];
+  return [...new Set(values)];
 }
