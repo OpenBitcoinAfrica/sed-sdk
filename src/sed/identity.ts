@@ -20,14 +20,20 @@ export interface ResolveOptions {
 const DEFAULT_TIMEOUT_MS = 5000;
 
 /**
- * Resolve the OPK and IPK the domain currently lists in nostr.json.
- *
- * The file does not cryptographically bind the keys. Callers that already
- * trust an IPK should pass it as `expectedIpk`; a mismatch fails resolution.
- * SeD-01 treats the IPK as permanent and permits OPK rotation only. An
- * unexpected change to the `_` entry is a red flag, and this stateless
- * function cannot detect it unless the caller supplies its expected IPK.
+ * The single case policy for keys in this module: hex keys are accepted in
+ * any case and normalized to lowercase. Returns the lowercase key, or null
+ * if the value is not 64 hex characters.
  */
+function normalizeHex64(value: string): string | null {
+  const lower = value.toLowerCase();
+  return HEX64.test(lower) ? lower : null;
+}
+
+/** True for a JSON object; false for null, arrays and primitives. */
+function isPlainObject(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
 export async function resolveServiceIdentity(
   domain: string,
   opkName: string,
@@ -64,38 +70,39 @@ export async function resolveServiceIdentity(
     return fail(`could not reach ${domain}: ${reason}`);
   }
 
-  if (typeof body !== "object" || body === null || !("names" in body)) {
-    return fail(`nostr.json at ${domain} has no "names" object`);
-  }
-  const names = (body as { names: unknown }).names;
-  if (typeof names !== "object" || names === null) {
+  if (!isPlainObject(body) || !isPlainObject(body["names"])) {
     return fail(`nostr.json at ${domain} has no "names" object`);
   }
 
-  const rawOpk = (names as Record<string, unknown>)[opkName];
+  const names = body["names"];
+
+  const rawOpk = names[opkName];
   if (typeof rawOpk !== "string") {
     return fail(`nostr.json at ${domain} has no "${opkName}" entry under "names"`);
   }
-  const fileOpk = rawOpk.toLowerCase();
-  if (!HEX64.test(fileOpk)) {
+
+  const fileOpk = normalizeHex64(rawOpk);
+  if (fileOpk === null) {
     return fail(`"${opkName}" in nostr.json at ${domain} must be 64 hex characters`);
   }
 
-  const rawIpk = (names as Record<string, unknown>)["_"];
+  if (fileOpk !== opk) {
+    return fail(`the "${opkName}" entry in nostr.json at ${domain} does not match the key that signed this event`);
+  }
+
+  const rawIpk = names["_"];
   if (typeof rawIpk !== "string") {
     return fail(`nostr.json at ${domain} has no "_" entry under "names"`);
   }
-  const ipk = rawIpk.toLowerCase();
-  if (!HEX64.test(ipk)) {
+
+  const ipk = normalizeHex64(rawIpk);
+  if (ipk === null) {
     return fail(`"_" in nostr.json at ${domain} must be 64 hex characters`);
   }
   if (expectedIpk !== undefined && ipk !== expectedIpk) {
     return fail(`the "_" entry in nostr.json at ${domain} is not the identity key that was expected for this service`);
   }
 
-  if (fileOpk !== opk.toLowerCase()) {
-    return fail(`the "${opkName}" entry in nostr.json at ${domain} does not match the key that signed this event`);
-  }
   if (ipk === fileOpk) {
     return fail(`"_" and "${opkName}" must not be the same key in nostr.json at ${domain}`);
   }
