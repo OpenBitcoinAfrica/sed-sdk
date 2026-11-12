@@ -20,7 +20,7 @@ The SDK is written against the [SeD specification](https://github.com/OpenBitcoi
 
 Say you run a payment service in Nigeria and you want to open a corridor into Kenya. You need a local partner who can do cash in and cash out. Today you find one through Telegram groups and people you know. SeD gives you a better way.
 
-**Capability signals.** A service publishes a small signed message to Nostr relays that says: these are the countries, currencies and payment rails I support, this is how much volume I can handle, and this is where my API lives. The message expires, so a service that goes quiet drops out of search results on its own.
+**Capability signals.** A service publishes a small signed message to Nostr relays that says: these are the countries, currencies and payment rails I support, this is how much volume I can handle, and this is where my API lives.
 
 **Attestations.** A service that has actually done business with another one can publish a signed statement about it: what kind of work it was, what size, whether the other side kept its promises. There is no score and no star rating. Clients read the facts and decide for themselves.
 
@@ -48,7 +48,7 @@ The SDK covers all of this: building and checking events, the domain check, revo
 
 ## Install
 
-You need Node 22 or newer. The SDK uses the built in `fetch`, `AbortSignal.timeout` and `WebSocket`, and Node 20 has no global `WebSocket`.
+You need Node 22 or newer.
 
 ```
 npm install @openbitcoin-africa/sed-sdk
@@ -60,11 +60,7 @@ Everything is exported from the package root:
 import { buildCapabilitySignal, resolveTrustedSignal } from "@openbitcoin-africa/sed-sdk";
 ```
 
-The SDK does not sign events or store keys for you. For signing it expects you to use [nostr-tools](https://github.com/nostr-protocol/nostr-tools) (`finalizeEvent`, `generateSecretKey`, `getPublicKey` from `nostr-tools/pure`). The SDK depends on it already, but your own code should install it too, so you do not rely on it being there by accident:
-
-```
-npm install nostr-tools
-```
+The SDK does not sign events or store keys for you. Every builder returns an unsigned event, and you sign it with whatever you already use: [nostr-tools](https://github.com/nbd-wtf/nostr-tools) (finalizeEvent from nostr-tools/pure, as the examples do), a NIP-07 browser extension, a NIP-46 remote signer, or a hardware signer. The one exception is private attestations, which need a raw secret key so the SDK can encrypt with NIP-44. If your code uses nostr-tools directly, install it yourself with `npm install nostr-tools`.
 
 ## Quick start
 
@@ -128,7 +124,7 @@ for (const candidate of found) {
 pool.close(relays);
 ```
 
-With the made up domain above, the check will fail at the domain step, because `service.com` does not list that key. That is the check doing its job. To see a full run that passes, clone this repo and run the offline walkthrough, which fakes the domain and the relays:
+With the made up domain above, the check will fail at the domain step, because `service.com` does not list that key. That is the check doing its job. To see a full run that passes, clone this [repo](https://github.com/OpenBitcoinAfrica/sed-sdk) and run the offline walkthrough, which fakes the domain and the relays:
 
 ```
 npx tsx examples/walkthrough.ts
@@ -472,3 +468,10 @@ CI runs the typecheck, the tests and the build on Node 22 and 24.
 
 
 npm install, npm run typecheck, npm test.
+
+npm version patch --no-git-tag-version
+
+
+Patch (0.1.1 to 0.1.2) for fixes and docs.
+Minor (0.1.x to 0.2.0) for new features or API changes. While you’re on 0.x, breaking changes also go here.
+Major (to 1.0.0) when you consider the API stable.
