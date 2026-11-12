@@ -1,0 +1,48 @@
+name: Publish
+
+# Publishes to npm when a GitHub release is published, with provenance, so the
+# package page shows which commit and workflow built it. It uses npm trusted
+# publishing, so no npm token is stored in GitHub. Before the first run, add
+# this repo and workflow as a trusted publisher on npmjs.com (the package's
+# Settings page, "Trusted Publisher").
+
+on:
+  release:
+    types: [published]
+
+permissions:
+  contents: read
+  id-token: write
+
+jobs:
+  publish:
+    name: Publish to npm
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          registry-url: https://registry.npmjs.org
+          cache: npm
+
+      - name: Use a current npm
+        run: npm install -g npm@latest
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Check the release tag matches package.json
+        run: |
+          version="$(node -p "require('./package.json').version")"
+          if [ "v$version" != "${{ github.event.release.tag_name }}" ]; then
+            echo "Release tag ${{ github.event.release.tag_name }} does not match package.json version v$version"
+            exit 1
+          fi
+
+      - name: Publish
+        run: npm publish --provenance --access public
