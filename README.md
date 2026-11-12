@@ -201,6 +201,22 @@ If the domain now lists a different `_` entry, the check fails. The SDK keeps no
 
 You can also use the pieces on their own: `parseCapabilitySignal`, `isSignalLive`, `verifyEventSignature`, `resolveServiceIdentity` and `resolveSignalIdentity`.
 
+### Reuse nostr.json with a cache (optional)
+
+By default every identity check downloads the domain's `nostr.json` again. If you check many signals from the same domains, you can pass a cache and skip the repeat downloads:
+
+```ts
+import { createNostrJsonCache, resolveTrustedSignal } from "@openbitcoin-africa/sed-sdk";
+
+const cache = createNostrJsonCache({ ttlMs: 60_000 }); // one minute
+
+const trusted = await resolveTrustedSignal(candidate, revocations, undefined, { cache });
+```
+
+Keep the lifetime short. While an entry is cached, a key that the domain has just removed still passes the domain check, so a long `ttlMs` delays the effect of pulling a compromised key out of `nostr.json`. The spec does not say how long a result may be reused, so the cache is off unless you turn it on.
+
+Only a successful download of a valid file is stored. Failures are never cached. Every check still runs against the cached file (the key must be listed, `expectedIpk` must match). If the cached file does not list the key, the SDK downloads a fresh copy before rejecting, so a service that has just rotated keys is not turned away because of stale data. The cache lives in memory, holds up to 1000 domains by default (`maxEntries`), and drops the oldest when it is full. To keep entries somewhere else, pass any object with `get(domain)` and `set(domain, body)`.
+
 ### Attest to a service (public)
 
 An attestation says "I dealt with this service". It always points at the subject's IPK, never at an OPK. You sign it with your own identity key.
@@ -338,8 +354,9 @@ Everything below is exported from `@openbitcoin-africa/sed-sdk`. Deep imports in
 |---|---|
 | `resolveServiceIdentity(domain, opkName, opk, options?)` | Fetches the domain's `nostr.json`, checks it lists `opk` under `opkName`, and returns `{ opkName, domain, opk, ipk }`. |
 | `resolveSignalIdentity(signal, options?)` | The same, taking the domain, name and key from a parsed signal. |
+| `createNostrJsonCache({ ttlMs, maxEntries? })` | An optional in-memory cache for fetched `nostr.json` files. Pass it as the `cache` option. |
 
-Options: `fetchImpl` (your own `fetch`), `timeoutMs` (default 5000), `expectedIpk`. The `opk` you pass must be lowercase hex. Keys read from the file can be any case.
+Options: `fetchImpl` (your own `fetch`), `timeoutMs` (default 5000), `expectedIpk`, `cache` (see `createNostrJsonCache`). The `opk` you pass must be lowercase hex. Keys read from the file can be any case.
 
 ### Verification and the combined check (SeD-06 phase 1)
 
@@ -406,7 +423,7 @@ Options: `fetchImpl` (your own `fetch`), `timeoutMs` (default 5000), `expectedIp
 * **All keys are lowercase hex, 64 characters.** The `opk` you give `resolveServiceIdentity` must be lowercase. A key written in capitals in a `nostr.json` file is fine, because the SDK lowercases what it reads from the file.
 * **A good signature is not enough.** `verifyEventSignature` proves nobody changed the event. It does not prove the key belongs to the service. The domain check does that, and `resolveTrustedSignal` runs both.
 * **Do not use nostr-tools' `verifyEvent` for this.** It caches its answer on the event object, and the cache survives `{ ...event, content: "x" }`. A forged copy of a real event could pass. The SDK's own check recomputes everything each time.
-* **Nothing is cached.** Every identity check fetches `nostr.json` again. The spec wants this, because a key must stop working as soon as the domain stops listing it. If you check many signals from one domain, you may want to batch them yourself.
+* **Nothing is cached unless you ask.** Every identity check fetches `nostr.json` again, because a key should stop working as soon as the domain stops listing it. If you check many signals from one domain, you can pass a cache with a short lifetime, and a removed key then keeps passing until the entry expires.
 * **The identity check only tells you what the domain says right now.** Use `expectedIpk` when you know the service already.
 * **Revocations and attestations are not fetched for you.** You decide where they come from and pass them in.
 * **Expired and revoked are different.** A signal expires by its own `expiration` tag. A key is revoked by an IPK signed notice. Both are checked.
@@ -477,6 +494,7 @@ CI runs the typecheck, the tests and the build on Node 22 and 24.
 * Revocation notices and the NIP-09 deletion request (SeD-05)
 * Signature and id verification that cannot be fooled by a cached flag (SeD-06 phase 1)
 * Domain based authorization of operational keys, with identity pinning through `expectedIpk` (SeD-01)
+* An optional, short lived in-memory cache for `nostr.json` (off by default)
 * The whole phase 1 check in one call (SeD-06 phase 1)
 * Relay publishing and querying, behind a small interface you can swap (SeD-04)
 * Proof of work mining and checking, for relays that require NIP-13 (SeD-04 section 4.2)
@@ -487,13 +505,12 @@ CI runs the typecheck, the tests and the build on Node 22 and 24.
 * **Bridge to the Pontmore agent discovery protocol.** Not part of SeD itself, and not started.
 * **Lightning admission (SeD-04 section 4.2).** Some relays will want a small Lightning payment instead of proof of work. The SDK does not attach an invoice or pay one. Each relay does this its own way, so it needs a real relay to build against.
 * **Fetching at scale.** The examples fetch attestations with a plain filter and a limit. That is fine for small networks. A real client will need smarter queries and its own storage.
-* **Caching of `nostr.json`.** None, on purpose for now. The spec does not say how long a result may be reused.
 
 ### Open questions for the spec
 
 * Which values may `capacity_tier` take?
 * Which tags in an attestation and in a revocation are required?
-* What makes an operational key "expired" apart from the signal's own `expiration` tag? How long may a `nostr.json` result be cached?
+* What makes an operational key "expired" apart from the signal's own `expiration` tag? How long may a `nostr.json` result be cached? Until the spec says, the cache is optional and you choose the lifetime.
 * What is the "proportional risk discount" at distance 2 supposed to be, given that SeD rejects numeric scoring?
 
 

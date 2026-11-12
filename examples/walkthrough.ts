@@ -2,8 +2,10 @@
  * A guided, narrated run through every piece of the SDK, in the order a
  * real service would actually use them: build a signal, sign it, verify
  * it, check that the signing key was authorized, run every SeD-06 phase 1
- * check together, publish and read it back from a relay, then build and
- * decrypt a private attestation between two other services.
+ * check together, publish and read it back from a relay, build and
+ * decrypt a private attestation between two other services, mine proof of
+ * work for relays that ask for it, collect a trust graph from relays that
+ * only return a few events at a time, and cache the domain check.
  *
  * Run it with:
  *
@@ -18,16 +20,25 @@
 import { finalizeEvent, generateSecretKey, getPublicKey } from "nostr-tools/pure";
 import { getConversationKey } from "nostr-tools/nip44";
 import {
+  addProofOfWork,
+  buildAttestation,
   buildCapabilitySignal,
   buildPrivateAttestation,
   buildRevocation,
+  collectTrustGraph,
+  createNostrJsonCache,
   decryptPrivateAttestation,
+  evaluateTrust,
   fetchEvents,
+  getEventDifficulty,
   isEventSignatureValid,
+  meetsDifficulty,
   parseCapabilitySignal,
   parsePrivateAttestationEnvelope,
+  parseRequiredPowBits,
   privateAttestationDTag,
   publishEvent,
+  resolveServiceIdentity,
   resolveTrustedSignal,
   type NostrEvent,
   type RelayPool,
@@ -277,5 +288,89 @@ const conversationKeyAsC = getConversationKey(serviceCSecret, serviceB);
 const dTagFromB = privateAttestationDTag(conversationKeyAsB, ipk, "liquidity");
 const dTagFromC = privateAttestationDTag(conversationKeyAsC, ipk, "liquidity");
 console.log("Service B and Service C derive the same d tag independently:", dTagFromB === dTagFromC && dTagFromB === envelope.value.dTag);
+
+// ---------------------------------------------------------------------
+step("9. Proof of work for relays that ask for it (SeD-04 section 4.2, pow.ts)");
+// ---------------------------------------------------------------------
+// Some relays only take capability signals whose id starts with a number
+// of zero bits (NIP-13). The work has to be mined into the unsigned
+// event before it is signed, and it has to be mined for the key that
+// will sign, because the pubkey is part of what gets hashed. 12 bits is
+// instant; real relays often want 20 or more.
+
+const mined = addProofOfWork(unsignedSignal, opk, 12);
+const minedSignal = finalizeEvent(mined, opkSecret);
+console.log("Difficulty of the signed event:", getEventDifficulty(minedSignal), "bits");
+console.log("Meets 12 bits:", meetsDifficulty(minedSignal, 12));
+
+// When a relay refuses an event for lacking work, its message usually says
+// how much it wants. publishEvent reads that out for you as requiredPowBits.
+console.log('Reading "pow: difficulty 25>=30" gives:', parseRequiredPowBits("pow: difficulty 25>=30"));
+
+// ---------------------------------------------------------------------
+step("10. Collect a trust graph from relays that only answer a few at a time (fetch.ts)");
+// ---------------------------------------------------------------------
+// A relay caps how many events one query returns. collectTrustGraph keeps
+// asking, hop by hop outward from your anchors, and fetches only the
+// attestations evaluateTrust can use. This fake relay answers two events
+// at a time, to show the paging working.
+
+const anchorSecret = generateSecretKey();
+const anchor = getPublicKey(anchorSecret);
+const partnerSecret = generateSecretKey();
+const partner = getPublicKey(partnerSecret);
+const newcomerSecret = generateSecretKey();
+const newcomer = getPublicKey(newcomerSecret);
+
+const network: NostrEvent[] = [
+  // You trust the anchor. The anchor vouches for a partner. The partner vouches for a newcomer.
+  finalizeEvent(buildAttestation({ subject: partner, type: "liquidity", lastActive: now }), anchorSecret),
+  finalizeEvent(buildAttestation({ subject: newcomer, type: "liquidity", lastActive: now }), partnerSecret),
+  // Noise from elsewhere on the network that the walk should never download.
+  ...Array.from({ length: 5 }, (_, i) => {
+    const stranger = generateSecretKey();
+    return finalizeEvent(
+      buildAttestation({ subject: getPublicKey(generateSecretKey()), type: "liquidity", createdAt: now - i, lastActive: now }),
+      stranger,
+    );
+  }),
+];
+
+const smallPagesRelay: RelayPool = {
+  publish: () => [],
+  querySync: async (_relays, filter) =>
+    network
+      .filter((e) => (!filter.kinds || filter.kinds.includes(e.kind)) && (!filter.authors || filter.authors.includes(e.pubkey)))
+      .filter((e) => !filter["#p"] || e.tags.some((tag) => tag[0] === "p" && filter["#p"]!.includes(tag[1] ?? "")))
+      .filter((e) => (filter.until === undefined || e.created_at <= filter.until))
+      .sort((a, b) => b.created_at - a.created_at)
+      .slice(0, 2),
+};
+
+const graph = await collectTrustGraph(smallPagesRelay, relays, [anchor], { candidateIpk: newcomer });
+console.log("Collected", graph.attestations.length, "attestation(s) out of", network.length, "on the network. Cut short:", graph.truncated);
+
+const evidence = evaluateTrust(newcomer, graph.attestations, [anchor], { type: "liquidity" });
+console.log("Newcomer is", evidence.distance, "hops from the anchor, reliability:", evidence.reliability);
+
+// ---------------------------------------------------------------------
+step("11. Reuse nostr.json with a cache (identity.ts)");
+// ---------------------------------------------------------------------
+// By default every identity check downloads the domain's nostr.json
+// again. With a cache, repeat checks within the lifetime skip the
+// download. Keep the lifetime short: a key the domain has just removed
+// keeps passing until its cached entry expires.
+
+let downloads = 0;
+const countingFetch = (async () => {
+  downloads++;
+  return { ok: true, json: async () => fakeNostrJson } as Response;
+}) as typeof fetch;
+
+const cache = createNostrJsonCache({ ttlMs: 60_000 });
+for (let i = 0; i < 3; i++) {
+  await resolveServiceIdentity("example.com", "api", opk, { fetchImpl: countingFetch, cache });
+}
+console.log("Three checks, downloads of nostr.json:", downloads);
 
 step("Done");

@@ -24,15 +24,24 @@ export interface PublishOutcome {
   relay: string;
   ok: boolean;
   reason: string;
+  requiredPowBits?: number;
+}
+
+export function parseRequiredPowBits(reason: string): number | undefined {
+  const at = reason.search(/\bpow\b/i);
+  if (at === -1) return undefined;
+  const numbers = (reason.slice(at).match(/\d+/g) ?? []).map(Number).filter((n) => n >= 1 && n <= 256);
+  return numbers.length === 0 ? undefined : Math.max(...numbers);
 }
 
 export async function publishEvent(pool: RelayPool, relays: string[], event: NostrEvent): Promise<PublishOutcome[]> {
   const settled = await Promise.allSettled(pool.publish(relays, event));
   return relays.map((relay, i) => {
     const outcome = settled[i]!;
-    return outcome.status === "fulfilled"
-      ? { relay, ok: true, reason: outcome.value }
-      : { relay, ok: false, reason: outcome.reason instanceof Error ? outcome.reason.message : String(outcome.reason) };
+    if (outcome.status === "fulfilled") return { relay, ok: true, reason: outcome.value };
+    const reason = outcome.reason instanceof Error ? outcome.reason.message : String(outcome.reason);
+    const requiredPowBits = parseRequiredPowBits(reason);
+    return requiredPowBits === undefined ? { relay, ok: false, reason } : { relay, ok: false, reason, requiredPowBits };
   });
 }
 

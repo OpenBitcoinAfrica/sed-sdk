@@ -9,3 +9,4 @@ export * from "./identity.js";
 export * from "./trust.js";
 export * from "./relay.js";
 export * from "./pow.js";
+export * from "./fetch.js";
