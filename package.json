@@ -1,28 +1,39 @@
 {
-  "name": "sed-sdk",
-  "version": "0.0.1",
+  "name": "@openbitcoinafrica/sed-sdk",
+  "version": "0.1.0",
   "description": "TypeScript SDK for the SeD (Service Discovery) protocol on Nostr",
+  "type": "module",
   "main": "dist/sed/index.js",
   "types": "dist/sed/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/sed/index.d.ts",
+      "default": "./dist/sed/index.js"
+    }
+  },
+  "files": ["dist", "README.md", "LICENSE"],
   "scripts": {
     "test": "vitest run",
     "typecheck": "tsc --noEmit",
-    "build": "tsc -p tsconfig.build.json"
+    "build": "tsc -p tsconfig.build.json",
+    "prepublishOnly": "npm run typecheck && npm test && npm run build"
   },
   "repository": {
     "type": "git",
     "url": "git+https://github.com/OpenBitcoinAfrica/sed-sdk.git"
   },
-  "keywords": [],
-  "author": "",
-  "license": "ISC",
+  "keywords": ["nostr", "bitcoin", "lightning", "service-discovery", "sed", "africa"],
+  "author": "OpenBitcoinAfrica",
+  "license": "MIT",
   "bugs": {
     "url": "https://github.com/OpenBitcoinAfrica/sed-sdk/issues"
   },
   "homepage": "https://github.com/OpenBitcoinAfrica/sed-sdk#readme",
-  "type": "module",
   "engines": {
     "node": ">=22"
+  },
+  "publishConfig": {
+    "access": "public"
   },
   "dependencies": {
     "@noble/curves": "^2.0.1",
