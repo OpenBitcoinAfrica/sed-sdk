@@ -8,3 +8,4 @@ export * from "./verify.js";
 export * from "./identity.js";
 export * from "./trust.js";
 export * from "./relay.js";
+export * from "./pow.js";

@@ -156,6 +156,25 @@ Every builder returns an unsigned event template. You sign it yourself. A builde
 
 You can run more than one OPK, such as `pos@service.com` and `lightning@service.com`, as long as each is listed in `nostr.json`.
 
+### Mine proof of work for relays that demand it
+
+Some relays only accept kind 30078 events whose id starts with a number of zero bits (NIP-13, and SeD-04 section 4.2). If you publish to one without doing the work, it rejects the event. Mine the work into the unsigned template before you sign:
+
+```ts
+import { finalizeEvent, getPublicKey } from "nostr-tools/pure";
+import { addProofOfWork, buildCapabilitySignal } from "@openbitcoin-africa/sed-sdk";
+
+const unsigned = buildCapabilitySignal({ /* as in the quick start */ });
+const mined = addProofOfWork(unsigned, getPublicKey(opkSecret), 20);
+const signal = finalizeEvent(mined, opkSecret);
+```
+
+The pubkey you pass must belong to the key that signs, because the pubkey is part of what gets hashed. Sign with a different key and the work is lost.
+
+Mining sets `created_at` to the current time, so build your `expiration` from the current time as well. It also blocks the thread while it runs. Around 16 bits is instant, 24 bits can take seconds, and 28 or more can take minutes, so use a worker if that matters. The work has to be redone for every new event, including each renewal. `addProofOfWork` accepts 1 to 32 bits, to stop a typo from hanging your process.
+
+To check an event, `getEventDifficulty(event)` returns the leading zero bits of its real id and `meetsDifficulty(event, bits)` returns true or false. Both recompute the id from the event's own fields and ignore the nonce tag, because anyone can write a large target into a nonce tag.
+
 ### Discover and check signals (client side)
 
 `resolveTrustedSignal(event, revocations, now?, options?)` runs the whole structural check in order and stops at the first failure:
@@ -359,6 +378,15 @@ Options: `fetchImpl` (your own `fetch`), `timeoutMs` (default 5000), `expectedIp
 |---|---|
 | `evaluateTrust(candidateIpk, attestations, anchors, query, options?)` | Returns distance, reliability, supporting attestations, disputes and conflict flags. |
 
+### Proof of work (SeD-04 section 4.2)
+
+| Function | What it does |
+|---|---|
+| `addProofOfWork(template, pubkey, difficulty)` | Mines a nonce into an unsigned template. Returns a new template and leaves the input alone. |
+| `getEventDifficulty(event)` | Leading zero bits of the event's real id. |
+| `meetsDifficulty(event, bits)` | True if the real id has at least that many zero bits. |
+| `MAX_POW_DIFFICULTY` | The highest difficulty `addProofOfWork` accepts, 32. |
+
 ### Relays (SeD-04)
 
 | Function | What it does |
@@ -422,6 +450,7 @@ src/sed/identity.ts             SeD-01 operational key authorization
 src/sed/trust.ts                SeD-06 phase 1, every check in one call
 src/sed/reputation.ts           SeD-06 phases 2 and 3, trust evaluation
 src/sed/relay.ts                SeD-04 relay transport
+src/sed/pow.ts                  SeD-04 section 4.2, proof of work (NIP-13)
 src/sed/index.ts                exports everything above
 test/                           one test file per source file
 examples/walkthrough.ts         offline, narrated run through every piece
@@ -450,12 +479,13 @@ CI runs the typecheck, the tests and the build on Node 22 and 24.
 * Domain based authorization of operational keys, with identity pinning through `expectedIpk` (SeD-01)
 * The whole phase 1 check in one call (SeD-06 phase 1)
 * Relay publishing and querying, behind a small interface you can swap (SeD-04)
+* Proof of work mining and checking, for relays that require NIP-13 (SeD-04 section 4.2)
 * Trust evaluation: graph distance, disputes, conflicts, isolated clusters (SeD-06 phases 2 and 3)
 
 ### Pending
 
 * **Bridge to the Pontmore agent discovery protocol.** Not part of SeD itself, and not started.
-* **Relay admission rules (SeD-04 section 4.2).** Some relays will require NIP-13 proof of work or a Lightning payment. `publishEvent` sends the event as it is, so those relays will reject it. The SDK does not yet mine a nonce or attach an invoice.
+* **Lightning admission (SeD-04 section 4.2).** Some relays will want a small Lightning payment instead of proof of work. The SDK does not attach an invoice or pay one. Each relay does this its own way, so it needs a real relay to build against.
 * **Fetching at scale.** The examples fetch attestations with a plain filter and a limit. That is fine for small networks. A real client will need smarter queries and its own storage.
 * **Caching of `nostr.json`.** None, on purpose for now. The spec does not say how long a result may be reused.
 
