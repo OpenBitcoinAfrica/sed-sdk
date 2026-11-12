@@ -66,7 +66,7 @@ export function parseCapabilitySignal(event: NostrEvent): Result<CapabilitySigna
     }
   }
 
-   const regions = requireMany(
+  const regions = requireMany(
     event,
     "region",
     (r) => REGION_RE.test(r),
@@ -113,7 +113,6 @@ export function parseCapabilitySignal(event: NostrEvent): Result<CapabilitySigna
       } else {
         expiration = value;
       }
-     
     }
   }
 
