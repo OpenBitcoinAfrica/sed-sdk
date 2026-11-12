@@ -46,8 +46,6 @@ export function parseCapabilitySignal(event: NostrEvent): Result<CapabilitySigna
   const d = exactlyOne(event, "d", errors);
   if (d && d[1] !== "capability-signal") errors.push('"d" tag must be "capability-signal"');
 
-  // nip05: normalize to lowercase before validating, so the stored
-  // identifier, name and domain always agree with each other.
   let nip05 = "";
   let name = "";
   let domain = "";
@@ -97,7 +95,6 @@ export function parseCapabilitySignal(event: NostrEvent): Result<CapabilitySigna
     else capacityTier = value;
   }
 
-  // expiration: must be after created_at and within the maximum TTL.
   let expiration = 0;
   const ex = exactlyOne(event, "expiration", errors);
   if (ex) {
@@ -116,8 +113,6 @@ export function parseCapabilitySignal(event: NostrEvent): Result<CapabilitySigna
     }
   }
 
-  // endpoint: https URL without credentials, plus a port that must not
-  // contradict a port written into the URL itself.
   let endpoint = { url: "", port: 0 };
   const ep = exactlyOne(event, "endpoint", errors);
   if (ep) {

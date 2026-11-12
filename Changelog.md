@@ -6,14 +6,6 @@ below 1.0, a minor release (0.1 to 0.2) can change the API, and a patch release
 
 ## 0.2.0
 
-### Changed
-
-* **Signal lifetime is now at most 7 days**, as SeD-02 says. Before, the SDK
-  allowed up to 90. `MAX_SIGNAL_TTL_SECONDS` changed with it. A signal with an
-  expiration more than 7 days after its `created_at` is now rejected by
-  `parseCapabilitySignal` and `buildCapabilitySignal`.
-* The README was rewritten as developer documentation.
-
 ### Added
 
 * **Proof of work (NIP-13).** `addProofOfWork` mines a nonce into an unsigned

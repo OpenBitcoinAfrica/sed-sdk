@@ -72,10 +72,9 @@ import {
   buildCapabilitySignal,
   createRelayPool,
   fetchEvents,
-  parseRevocation,
+  fetchRevocationsFor,
   publishEvent,
   resolveTrustedSignal,
-  revocationDTag,
 } from "@openbitcoin-africa/sed-sdk";
 
 const relays = ["wss://relay.damus.io", "wss://nos.lol"];
@@ -104,14 +103,7 @@ for (const outcome of await publishEvent(pool, relays, signal)) {
 const found = await fetchEvents(pool, relays, { kinds: [30078], limit: 50 });
 
 for (const candidate of found) {
-  const revocationEvents = await fetchEvents(pool, relays, {
-    kinds: [30080],
-    "#d": [revocationDTag(candidate.pubkey)],
-  });
-  const revocations = revocationEvents.flatMap((e) => {
-    const r = parseRevocation(e);
-    return r.ok ? [r.value] : [];
-  });
+  const { revocations } = await fetchRevocationsFor(pool, relays, candidate.pubkey);
 
   const trusted = await resolveTrustedSignal(candidate, revocations);
   if (trusted.ok) {
@@ -173,6 +165,8 @@ The pubkey you pass must belong to the key that signs, because the pubkey is par
 
 Mining sets `created_at` to the current time, so build your `expiration` from the current time as well. It also blocks the thread while it runs. Around 16 bits is instant, 24 bits can take seconds, and 28 or more can take minutes, so use a worker if that matters. The work has to be redone for every new event, including each renewal. `addProofOfWork` accepts 1 to 32 bits, to stop a typo from hanging your process.
 
+When a relay refuses an event for lacking work and says how much it wants, `publishEvent` puts that number in the outcome as `requiredPowBits`. Mine at least that many bits and publish again. Relays word this differently, so treat it as a hint and fall back to the message in `reason` when it is missing.
+
 To check an event, `getEventDifficulty(event)` returns the leading zero bits of its real id and `meetsDifficulty(event, bits)` returns true or false. Both recompute the id from the event's own fields and ignore the nonce tag, because anyone can write a large target into a nonce tag.
 
 ### Discover and check signals (client side)
@@ -187,7 +181,7 @@ To check an event, `getEventDifficulty(event)` returns the leading zero bits of 
 
 On success you get `{ signal, identity }`. `identity.ipk` is the key you use for everything about reputation.
 
-It takes the revocations as an argument and does not fetch them. Fetch them with `fetchEvents` as in the quick start. If you do not use `createRelayPool` to get events, check each event with `verifyEventSignature` yourself, because only that pool checks signatures as events arrive.
+It takes the revocations as an argument and does not fetch them. Fetch them with `fetchRevocationsFor` as in the quick start. If you do not use `createRelayPool` to get events, check each event with `verifyEventSignature` yourself, because only that pool checks signatures as events arrive.
 
 **Pin the identity key if you already know it.** `nostr.json` is the only thing linking the OPK to the IPK, so whoever controls that URL controls the link. If you already hold the service's IPK, for example from your anchor set, pass it in:
 
@@ -273,18 +267,36 @@ if (inner.ok) console.log(inner.value.subject, inner.value.slaCompliance);
 
 A wrong key or tampered content returns an error result, never a crash. Decrypting does not check the signature, so run `verifyEventSignature` on the event first. One event reaches one recipient. To reach five partners, build five events.
 
-### Weigh the evidence
+### Fetch everything, not just the first page
 
-`evaluateTrust` takes a candidate's IPK, a list of parsed attestations, and your anchors (IPKs you already trust), and tells you what the graph shows.
+A relay limits how much one query may return, often a few hundred or a few thousand events, and `fetchEvents` is a single query. On a busy network it quietly gives you a partial picture. For anything where completeness matters, use `fetchAllEvents`. It keeps asking for older events until the relays have nothing more, removes duplicates, and tells you if it stopped early:
 
 ```ts
-import { evaluateTrust, fetchEvents, parseAttestation } from "@openbitcoin-africa/sed-sdk";
+import { fetchAllEvents } from "@openbitcoin-africa/sed-sdk";
 
-const events = await fetchEvents(pool, relays, { kinds: [30079], limit: 1000 });
-const attestations = events.flatMap((e) => {
-  const r = parseAttestation(e);
-  return r.ok ? [r.value] : [];
+const { events, truncated } = await fetchAllEvents(pool, relays, { kinds: [30078] }, { maxEvents: 2000 });
+if (truncated) console.log("There are more signals than this on the relays");
+```
+
+`maxEvents` (default 5000) and `maxPages` (default 50) cap the work. If `truncated` is true you hit one of them. If it is false, the relays had nothing further to give. One edge case: if more events share a single second than a relay returns in one page, the extra ones at that second cannot be reached by paging.
+
+For the two most common jobs there are shortcuts that ask relays only for what you need:
+
+* `fetchAttestationsAbout(pool, relays, ipk)` returns every attestation naming that service, parsed, with only the newest kept for each attester and type.
+* `fetchRevocationsFor(pool, relays, opk)` returns the revocation notices for one operational key. Whether one counts is still decided by `isOpkRevoked`.
+
+### Weigh the evidence
+
+`evaluateTrust` takes a candidate's IPK, a list of parsed attestations, and your anchors (IPKs you already trust), and tells you what the graph shows. `collectTrustGraph` fetches the attestations it needs. It goes as many hops as `maxDistance` (default 2, the same as `evaluateTrust`), so pass the same value to both if you change it.
+
+```ts
+import { collectTrustGraph, evaluateTrust } from "@openbitcoin-africa/sed-sdk";
+
+// Walks out from your anchors, fetching only the attestations the walk needs.
+const { attestations, truncated } = await collectTrustGraph(pool, relays, myAnchors, {
+  candidateIpk,
 });
+if (truncated) console.log("The graph may be incomplete, so the candidate may look further away than it is");
 
 const evidence = evaluateTrust(candidateIpk, attestations, myAnchors, {
   type: "liquidity",
@@ -409,8 +421,13 @@ Options: `fetchImpl` (your own `fetch`), `timeoutMs` (default 5000), `expectedIp
 | Function | What it does |
 |---|---|
 | `createRelayPool(options?)` | A relay pool that checks every incoming event with this SDK's own signature check. |
-| `publishEvent(pool, relays, event)` | Sends to every relay. Returns `{ relay, ok, reason }` for each, and never throws. |
-| `fetchEvents(pool, relays, filter)` | Queries the relays. Returns events newest first. |
+| `publishEvent(pool, relays, event)` | Sends to every relay. Returns `{ relay, ok, reason, requiredPowBits? }` for each, and never throws. |
+| `fetchEvents(pool, relays, filter)` | One query to the relays. Returns events newest first. A relay may return only part of what matches. |
+| `fetchAllEvents(pool, relays, filter, options?)` | Pages through everything a filter matches. Returns `{ events, truncated }`. |
+| `fetchAttestationsAbout(pool, relays, ipk, options?)` | All attestations naming one subject. Returns `{ attestations, truncated, skipped }`. |
+| `fetchRevocationsFor(pool, relays, opk, options?)` | Revocation notices for one operational key. Returns `{ revocations, truncated, skipped }`. |
+| `collectTrustGraph(pool, relays, anchors, options?)` | Collects the attestations `evaluateTrust` needs, hop by hop from your anchors. Returns `{ attestations, truncated, skipped }`. |
+| `parseRequiredPowBits(reason)` | Reads the proof of work bits a relay asks for out of its rejection message. |
 
 `publishEvent` and `fetchEvents` only need an object with `publish` and `querySync` methods (the `RelayPool` interface). That is what lets you swap in a fake pool in tests, or a different transport.
 
@@ -425,8 +442,10 @@ Options: `fetchImpl` (your own `fetch`), `timeoutMs` (default 5000), `expectedIp
 * **Do not use nostr-tools' `verifyEvent` for this.** It caches its answer on the event object, and the cache survives `{ ...event, content: "x" }`. A forged copy of a real event could pass. The SDK's own check recomputes everything each time.
 * **Nothing is cached unless you ask.** Every identity check fetches `nostr.json` again, because a key should stop working as soon as the domain stops listing it. If you check many signals from one domain, you can pass a cache with a short lifetime, and a removed key then keeps passing until the entry expires.
 * **The identity check only tells you what the domain says right now.** Use `expectedIpk` when you know the service already.
-* **Revocations and attestations are not fetched for you.** You decide where they come from and pass them in.
+* **Revocations and attestations are not fetched for you.** `resolveTrustedSignal` and `evaluateTrust` take them as arguments. `fetchRevocationsFor` and `collectTrustGraph` are there to get them from relays.
+* **Check `truncated`.** Every fetch helper reports whether it stopped early. An incomplete graph can make a good service look far away or isolated, so do not read a missing path as proof there is none until `truncated` is false.
 * **Expired and revoked are different.** A signal expires by its own `expiration` tag. A key is revoked by an IPK signed notice. Both are checked.
+* **The whole file is downloaded, with no `?name=` query.** SeD-01 says to fetch `/.well-known/nostr.json` and read it, and that is what the SDK does. A plain file on a web server works. A host that builds its answer per name, as some NIP-05 services do, may return nothing useful to a request without a name.
 * **Domains are strict.** A `nip05` domain with a port, a username, an IP address, a trailing dot or no dot is rejected before any request is made, and redirects are refused. This is on purpose, so a signal cannot point your client at some other server.
 * **Use `ws` on Node if the built in `WebSocket` crashes.** Node's own `WebSocket` is built on undici, which has a history of taking the whole process down when a connection errors out. `createRelayPool({ websocketImplementation })` takes any WebSocket class. `examples/relay-live.ts` shows it with the `ws` package.
 
@@ -468,6 +487,7 @@ src/sed/trust.ts                SeD-06 phase 1, every check in one call
 src/sed/reputation.ts           SeD-06 phases 2 and 3, trust evaluation
 src/sed/relay.ts                SeD-04 relay transport
 src/sed/pow.ts                  SeD-04 section 4.2, proof of work (NIP-13)
+src/sed/fetch.ts                SeD-04 paging, targeted fetches, trust graph collection
 src/sed/index.ts                exports everything above
 test/                           one test file per source file
 examples/walkthrough.ts         offline, narrated run through every piece
@@ -497,22 +517,25 @@ CI runs the typecheck, the tests and the build on Node 22 and 24.
 * An optional, short lived in-memory cache for `nostr.json` (off by default)
 * The whole phase 1 check in one call (SeD-06 phase 1)
 * Relay publishing and querying, behind a small interface you can swap (SeD-04)
-* Proof of work mining and checking, for relays that require NIP-13 (SeD-04 section 4.2)
+* Proof of work mining and checking, for relays that require NIP-13, and reading how much a relay asks for (SeD-04 section 4.2)
+* Paging through everything on the relays, targeted fetches for one subject or key, and trust graph collection that reports when it was cut short
 * Trust evaluation: graph distance, disputes, conflicts, isolated clusters (SeD-06 phases 2 and 3)
 
 ### Pending
 
 * **Bridge to the Pontmore agent discovery protocol.** Not part of SeD itself, and not started.
 * **Lightning admission (SeD-04 section 4.2).** Some relays will want a small Lightning payment instead of proof of work. The SDK does not attach an invoice or pay one. Each relay does this its own way, so it needs a real relay to build against.
-* **Fetching at scale.** The examples fetch attestations with a plain filter and a limit. That is fine for small networks. A real client will need smarter queries and its own storage.
+* **Private attestations in the trust graph.** SeD-06 lets a client count private attestations it can decrypt and authenticate. `collectTrustGraph` only collects public ones. You can fetch, verify and decrypt private attestations yourself and add them to the list you give `evaluateTrust`.
+* **Freshness per interaction type.** SeD-06 lets a client set a different freshness window for each interaction type. The SDK has one window for all of them.
+* **Storage for fetched events.** The fetch helpers always ask the relays. A client that wants to keep what it has seen and only ask for what is newer needs a store to sync into. That is left to the application for now.
 
 ### Open questions for the spec
 
 * Which values may `capacity_tier` take?
 * Which tags in an attestation and in a revocation are required?
 * What makes an operational key "expired" apart from the signal's own `expiration` tag? How long may a `nostr.json` result be cached? Until the spec says, the cache is optional and you choose the lifetime.
+* SeD-06 says to filter attestations by corridor and currency, but an attestation carries only verified rails and a volume tier, with no region or currency tag. Should it?
 * What is the "proportional risk discount" at distance 2 supposed to be, given that SeD rejects numeric scoring?
-
 
 npm install, npm run typecheck, npm test.
 
