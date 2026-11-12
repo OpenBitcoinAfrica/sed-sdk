@@ -1,5 +1,5 @@
 {
-  "name": "@openbitcoinafrica/sed-sdk",
+  "name": "@openbitcoin-africa/sed-sdk",
   "version": "0.1.0",
   "description": "TypeScript SDK for the SeD (Service Discovery) protocol on Nostr",
   "type": "module",
