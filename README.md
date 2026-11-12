@@ -2,7 +2,7 @@
 
 A TypeScript SDK for SeD (Service Discovery). SeD is a protocol that lets Bitcoin liquidity services announce what they offer on Nostr, and lets other services vouch for them, so a business in one country can find and check a partner in another without flying someone out to meet them.
 
-The SDK is written against the [SeD specification](https://github.com/OpenBitcoinAfrica/ServiceDiscoveryProtocol).
+The SDK is written against the [SeD specification](https://github.com/OpenBitcoinAfrica/ServiceDiscoveryProtocol). The spec is still a draft, and so is this SDK, so expect the API to change before 1.0. It is published on npm as `@openbitcoin-africa/sed-sdk`.
 
 ## Contents
 
@@ -20,7 +20,7 @@ The SDK is written against the [SeD specification](https://github.com/OpenBitcoi
 
 Say you run a payment service in Nigeria and you want to open a corridor into Kenya. You need a local partner who can do cash in and cash out. Today you find one through Telegram groups and people you know. SeD gives you a better way.
 
-**Capability signals.** A service publishes a small signed message to Nostr relays that says: these are the countries, currencies and payment rails I support, this is how much volume I can handle, and this is where my API lives.
+**Capability signals.** A service publishes a small signed message to Nostr relays that says: these are the countries, currencies and payment rails I support, this is how much volume I can handle, and this is where my API lives. The message expires, so a service that goes quiet drops out of search results on its own.
 
 **Attestations.** A service that has actually done business with another one can publish a signed statement about it: what kind of work it was, what size, whether the other side kept its promises. There is no score and no star rating. Clients read the facts and decide for themselves.
 
@@ -48,28 +48,23 @@ The SDK covers all of this: building and checking events, the domain check, revo
 
 ## Install
 
-You need Node 22 or newer. This SDK uses the built in `fetch`, `AbortSignal.timeout` and `WebSocket`.
+You need Node 22 or newer. The SDK uses the built in `fetch`, `AbortSignal.timeout` and `WebSocket`, and Node 20 has no global `WebSocket`.
 
 ```
-git clone https://github.com/OpenBitcoinAfrica/sed-sdk.git
-cd sed-sdk
-npm install
-npm test
+npm install @openbitcoin-africa/sed-sdk
 ```
 
-To compile to `dist/`:
-
-```
-npm run build
-```
-
-Everything is exported from one place. Inside this repo, import from `src/sed/index.js`. From a project that depends on the built package, the entry point is `dist/sed/index.js`.
+Everything is exported from the package root:
 
 ```ts
-import { buildCapabilitySignal, resolveTrustedSignal } from "./src/sed/index.js";
+import { buildCapabilitySignal, resolveTrustedSignal } from "@openbitcoin-africa/sed-sdk";
 ```
 
-The SDK does not sign events or store keys for you. For signing it expects you to use [nostr-tools](https://github.com/nostr-protocol/nostr-tools), which is already a dependency (`finalizeEvent`, `generateSecretKey`, `getPublicKey` from `nostr-tools/pure`).
+The SDK does not sign events or store keys for you. For signing it expects you to use [nostr-tools](https://github.com/nostr-protocol/nostr-tools) (`finalizeEvent`, `generateSecretKey`, `getPublicKey` from `nostr-tools/pure`). The SDK depends on it already, but your own code should install it too, so you do not rely on it being there by accident:
+
+```
+npm install nostr-tools
+```
 
 ## Quick start
 
@@ -85,7 +80,7 @@ import {
   publishEvent,
   resolveTrustedSignal,
   revocationDTag,
-} from "./src/sed/index.js";
+} from "@openbitcoin-africa/sed-sdk";
 
 const relays = ["wss://relay.damus.io", "wss://nos.lol"];
 const pool = createRelayPool();
@@ -133,7 +128,7 @@ for (const candidate of found) {
 pool.close(relays);
 ```
 
-With the made up domain above, the check will fail at the domain step, because `service.com` does not list that key. That is the check doing its job. To see a full run that passes, run the offline walkthrough, which fakes the domain and the relays:
+With the made up domain above, the check will fail at the domain step, because `service.com` does not list that key. That is the check doing its job. To see a full run that passes, clone this repo and run the offline walkthrough, which fakes the domain and the relays:
 
 ```
 npx tsx examples/walkthrough.ts
@@ -197,7 +192,7 @@ An attestation says "I dealt with this service". It always points at the subject
 
 ```ts
 import { finalizeEvent } from "nostr-tools/pure";
-import { buildAttestation, publishEvent } from "./src/sed/index.js";
+import { buildAttestation, publishEvent } from "@openbitcoin-africa/sed-sdk";
 
 const unsigned = buildAttestation({
   subject: theirIpk,
@@ -226,7 +221,7 @@ import {
   buildPrivateAttestation,
   decryptPrivateAttestation,
   parsePrivateAttestationEnvelope,
-} from "./src/sed/index.js";
+} from "@openbitcoin-africa/sed-sdk";
 
 // Attester
 const unsigned = buildPrivateAttestation({
@@ -252,7 +247,7 @@ A wrong key or tampered content returns an error result, never a crash. Decrypti
 `evaluateTrust` takes a candidate's IPK, a list of parsed attestations, and your anchors (IPKs you already trust), and tells you what the graph shows.
 
 ```ts
-import { evaluateTrust, fetchEvents, parseAttestation } from "./src/sed/index.js";
+import { evaluateTrust, fetchEvents, parseAttestation } from "@openbitcoin-africa/sed-sdk";
 
 const events = await fetchEvents(pool, relays, { kinds: [30079], limit: 1000 });
 const attestations = events.flatMap((e) => {
@@ -296,7 +291,7 @@ If an OPK is stolen, do these in order:
 
 ```ts
 import { finalizeEvent } from "nostr-tools/pure";
-import { buildRevocation, buildSignalDeletion, publishEvent } from "./src/sed/index.js";
+import { buildRevocation, buildSignalDeletion, publishEvent } from "@openbitcoin-africa/sed-sdk";
 
 const revocation = finalizeEvent(
   buildRevocation({ revokedOpk: stolenOpk, reason: "operational_key_compromise" }),
@@ -312,7 +307,7 @@ await publishEvent(pool, relays, deletion);
 
 ## API reference
 
-Everything below is exported from `src/sed/index.js`.
+Everything below is exported from `@openbitcoin-africa/sed-sdk`. Deep imports into `dist/` are blocked on purpose, so use the package root only.
 
 ### Capability signals (SeD-02)
 
@@ -412,6 +407,14 @@ The spec leaves some things open, and in a few places this SDK is stricter or di
 
 ## Project layout and scripts
 
+This part is for working on the SDK itself. Clone the repo, run `npm install`, and the scripts below work.
+
+```
+git clone https://github.com/OpenBitcoinAfrica/sed-sdk.git
+cd sed-sdk
+npm install
+```
+
 ```
 src/sed/common.ts               shared types, event kinds, tiers and tag helpers
 src/sed/signal.ts               SeD-02 capability signal
@@ -443,6 +446,7 @@ CI runs the typecheck, the tests and the build on Node 22 and 24.
 
 ### Done
 
+* Published to npm as `@openbitcoin-africa/sed-sdk`, version 0.1.0
 * Capability signals: parse, build, expiry check (SeD-02)
 * Public and private attestations: parse, build, latest-wins, NIP-44 encryption (SeD-03)
 * Revocation notices and the NIP-09 deletion request (SeD-05)
@@ -456,7 +460,6 @@ CI runs the typecheck, the tests and the build on Node 22 and 24.
 
 * **Bridge to the Pontmore agent discovery protocol.** Not part of SeD itself, and not started.
 * **Relay admission rules (SeD-04 section 4.2).** Some relays will require NIP-13 proof of work or a Lightning payment. `publishEvent` sends the event as it is, so those relays will reject it. The SDK does not yet mine a nonce or attach an invoice.
-* **Publishing to npm.** For now you use the repo directly.
 * **Fetching at scale.** The examples fetch attestations with a plain filter and a limit. That is fine for small networks. A real client will need smarter queries and its own storage.
 * **Caching of `nostr.json`.** None, on purpose for now. The spec does not say how long a result may be reused.
 
@@ -466,5 +469,6 @@ CI runs the typecheck, the tests and the build on Node 22 and 24.
 * Which tags in an attestation and in a revocation are required?
 * What makes an operational key "expired" apart from the signal's own `expiration` tag? How long may a `nostr.json` result be cached?
 * What is the "proportional risk discount" at distance 2 supposed to be, given that SeD rejects numeric scoring?
+
 
 npm install, npm run typecheck, npm test.
